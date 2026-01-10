@@ -1,39 +1,213 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, TrendingUp, TrendingDown, Scale, Dumbbell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
-const strengthData = [
-  { date: "Week 1", benchPress: 135, squat: 185, deadlift: 225 },
-  { date: "Week 2", benchPress: 140, squat: 195, deadlift: 235 },
-  { date: "Week 3", benchPress: 145, squat: 200, deadlift: 245 },
-  { date: "Week 4", benchPress: 150, squat: 205, deadlift: 255 },
-  { date: "Week 5", benchPress: 155, squat: 215, deadlift: 265 },
-  { date: "Week 6", benchPress: 160, squat: 225, deadlift: 275 },
-];
+interface WorkoutStats {
+  totalWorkouts: number;
+  totalVolume: number;
+  currentStreak: number;
+  avgSessionMinutes: number;
+}
 
-const bodyWeightData = [
-  { date: "Jan 1", weight: 175 },
-  { date: "Jan 3", weight: 174.5 },
-  { date: "Jan 5", weight: 174.2 },
-  { date: "Jan 7", weight: 173.8 },
-  { date: "Jan 9", weight: 173.5 },
-  { date: "Jan 10", weight: 173.2 },
-];
+interface BodyWeightEntry {
+  date: string;
+  weight: number;
+}
 
-const stats = [
-  { label: "Total Workouts", value: "48", change: "+8", positive: true },
-  { label: "Total Volume", value: "245k lbs", change: "+12%", positive: true },
-  { label: "Current Streak", value: "12 days", change: "+3", positive: true },
-  { label: "Avg. Session", value: "52 min", change: "-3 min", positive: false },
-];
+interface PersonalRecord {
+  exercise: string;
+  weight: string;
+  reps: number;
+  date: string;
+}
 
 export default function Progress() {
   const navigate = useNavigate();
+  const { user, loading: authLoading } = useAuth();
   const [activeTab, setActiveTab] = useState("strength");
+  const [isLoading, setIsLoading] = useState(true);
+  const [stats, setStats] = useState<WorkoutStats>({
+    totalWorkouts: 0,
+    totalVolume: 0,
+    currentStreak: 0,
+    avgSessionMinutes: 0
+  });
+  const [bodyWeightData, setBodyWeightData] = useState<BodyWeightEntry[]>([]);
+  const [personalRecords, setPersonalRecords] = useState<PersonalRecord[]>([]);
+  const [latestWeight, setLatestWeight] = useState<number | null>(null);
+  const [weightChange, setWeightChange] = useState<number>(0);
+
+  useEffect(() => {
+    if (!authLoading && user) {
+      fetchProgressData();
+    } else if (!authLoading && !user) {
+      setIsLoading(false);
+    }
+  }, [user, authLoading]);
+
+  const fetchProgressData = async () => {
+    if (!user) return;
+
+    try {
+      // Fetch all completed workouts
+      const { data: workouts, error: workoutsError } = await supabase
+        .from('workouts')
+        .select('*')
+        .eq('user_id', user.id)
+        .not('completed_at', 'is', null)
+        .order('completed_at', { ascending: false });
+
+      if (workoutsError) throw workoutsError;
+
+      // Fetch exercise logs
+      const { data: exerciseLogs, error: logsError } = await supabase
+        .from('exercise_logs')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (logsError) throw logsError;
+
+      // Fetch body measurements
+      const { data: measurements, error: measurementsError } = await supabase
+        .from('body_measurements')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('measured_at', { ascending: true });
+
+      if (measurementsError) throw measurementsError;
+
+      // Calculate stats
+      const totalWorkouts = workouts?.length || 0;
+      const totalVolume = (exerciseLogs || []).reduce((sum, log) => {
+        return sum + ((log.weight_kg || 0) * (log.reps || 0) * 2.20462); // Convert to lbs
+      }, 0);
+      const avgSession = totalWorkouts > 0
+        ? Math.round((workouts || []).reduce((sum, w) => sum + (w.duration_seconds || 0), 0) / totalWorkouts / 60)
+        : 0;
+
+      // Calculate streak
+      const streak = calculateStreak(workouts || []);
+
+      setStats({
+        totalWorkouts,
+        totalVolume: Math.round(totalVolume),
+        currentStreak: streak,
+        avgSessionMinutes: avgSession
+      });
+
+      // Process body weight data
+      const weightData = (measurements || [])
+        .filter(m => m.weight_kg !== null)
+        .map(m => ({
+          date: new Date(m.measured_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          weight: Math.round((m.weight_kg || 0) * 2.20462 * 10) / 10 // Convert to lbs
+        }));
+      setBodyWeightData(weightData);
+
+      if (weightData.length > 0) {
+        setLatestWeight(weightData[weightData.length - 1].weight);
+        if (weightData.length > 1) {
+          setWeightChange(Math.round((weightData[weightData.length - 1].weight - weightData[0].weight) * 10) / 10);
+        }
+      }
+
+      // Calculate personal records
+      const prs = calculatePersonalRecords(exerciseLogs || []);
+      setPersonalRecords(prs);
+
+    } catch (error) {
+      console.error('Error fetching progress data:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const calculateStreak = (workouts: any[]): number => {
+    if (workouts.length === 0) return 0;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const workoutDates = workouts
+      .map(w => {
+        const date = new Date(w.completed_at);
+        date.setHours(0, 0, 0, 0);
+        return date.getTime();
+      })
+      .filter((v, i, a) => a.indexOf(v) === i) // Unique dates
+      .sort((a, b) => b - a); // Most recent first
+
+    let streak = 0;
+    let checkDate = today.getTime();
+
+    for (const workoutDate of workoutDates) {
+      if (workoutDate === checkDate || workoutDate === checkDate - 86400000) {
+        streak++;
+        checkDate = workoutDate;
+      } else if (workoutDate < checkDate - 86400000) {
+        break;
+      }
+    }
+
+    return streak;
+  };
+
+  const calculatePersonalRecords = (logs: any[]): PersonalRecord[] => {
+    const exerciseMaxes: Record<string, { weight: number; reps: number; date: string }> = {};
+
+    logs.forEach(log => {
+      const weightLbs = (log.weight_kg || 0) * 2.20462;
+      const exercise = log.exercise_name;
+
+      if (!exerciseMaxes[exercise] || weightLbs > exerciseMaxes[exercise].weight) {
+        exerciseMaxes[exercise] = {
+          weight: Math.round(weightLbs),
+          reps: log.reps || 0,
+          date: new Date(log.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+        };
+      }
+    });
+
+    return Object.entries(exerciseMaxes)
+      .map(([exercise, data]) => ({
+        exercise,
+        weight: `${data.weight} lbs`,
+        reps: data.reps,
+        date: data.date
+      }))
+      .sort((a, b) => parseInt(b.weight) - parseInt(a.weight))
+      .slice(0, 5); // Top 5 PRs
+  };
+
+  const statsDisplay = [
+    { label: "Total Workouts", value: stats.totalWorkouts.toString(), change: "", positive: true },
+    { label: "Total Volume", value: stats.totalVolume > 1000 ? `${(stats.totalVolume / 1000).toFixed(1)}k lbs` : `${stats.totalVolume} lbs`, change: "", positive: true },
+    { label: "Current Streak", value: `${stats.currentStreak} days`, change: "", positive: true },
+    { label: "Avg. Session", value: `${stats.avgSessionMinutes} min`, change: "", positive: true },
+  ];
+
+  if (authLoading || isLoading) {
+    return (
+      <div className="min-h-screen px-4 pt-12 pb-4 animate-fade-in">
+        <header className="flex items-center gap-3 mb-6">
+          <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
+            <ArrowLeft className="w-5 h-5" />
+          </Button>
+          <div>
+            <h1 className="text-2xl font-bold">Progress</h1>
+            <p className="text-sm text-muted-foreground">Loading...</p>
+          </div>
+        </header>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen px-4 pt-12 pb-4 animate-fade-in">
@@ -50,21 +224,11 @@ export default function Progress() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 gap-3 mb-6">
-        {stats.map((stat) => (
+        {statsDisplay.map((stat) => (
           <Card key={stat.label} className="bg-card border-border">
             <CardContent className="p-4">
               <p className="text-xs text-muted-foreground mb-1">{stat.label}</p>
               <p className="text-xl font-bold">{stat.value}</p>
-              <div className={`flex items-center gap-1 text-xs mt-1 ${
-                stat.positive ? 'text-green-500' : 'text-red-500'
-              }`}>
-                {stat.positive ? (
-                  <TrendingUp className="w-3 h-3" />
-                ) : (
-                  <TrendingDown className="w-3 h-3" />
-                )}
-                {stat.change}
-              </div>
             </CardContent>
           </Card>
         ))}
@@ -75,7 +239,7 @@ export default function Progress() {
         <TabsList className="w-full mb-4">
           <TabsTrigger value="strength" className="flex-1 gap-2">
             <Dumbbell className="w-4 h-4" />
-            Strength
+            Personal Records
           </TabsTrigger>
           <TabsTrigger value="bodyweight" className="flex-1 gap-2">
             <Scale className="w-4 h-4" />
@@ -86,70 +250,31 @@ export default function Progress() {
         <TabsContent value="strength">
           <Card className="bg-card border-border">
             <CardContent className="p-4">
-              <h3 className="font-semibold mb-4">Strength Progress (lbs)</h3>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={strengthData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis 
-                      dataKey="date" 
-                      tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
-                      axisLine={{ stroke: 'hsl(var(--border))' }}
-                    />
-                    <YAxis 
-                      tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
-                      axisLine={{ stroke: 'hsl(var(--border))' }}
-                    />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: 'hsl(var(--card))', 
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: '8px'
-                      }}
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="benchPress" 
-                      stroke="hsl(50, 100%, 50%)" 
-                      strokeWidth={2}
-                      dot={{ fill: 'hsl(50, 100%, 50%)' }}
-                      name="Bench Press"
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="squat" 
-                      stroke="hsl(142, 76%, 46%)" 
-                      strokeWidth={2}
-                      dot={{ fill: 'hsl(142, 76%, 46%)' }}
-                      name="Squat"
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="deadlift" 
-                      stroke="hsl(0, 84%, 60%)" 
-                      strokeWidth={2}
-                      dot={{ fill: 'hsl(0, 84%, 60%)' }}
-                      name="Deadlift"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Legend */}
-              <div className="flex items-center justify-center gap-6 mt-4 pt-4 border-t border-border">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-primary" />
-                  <span className="text-xs">Bench Press</span>
+              <h3 className="font-semibold mb-4">Personal Records</h3>
+              {personalRecords.length === 0 ? (
+                <div className="text-center py-8">
+                  <Dumbbell className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+                  <p className="text-muted-foreground">No personal records yet</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Complete workouts to track your progress!
+                  </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-green-500" />
-                  <span className="text-xs">Squat</span>
+              ) : (
+                <div className="space-y-3">
+                  {personalRecords.map((pr) => (
+                    <div key={pr.exercise} className="flex items-center justify-between p-3 bg-secondary/50 rounded-lg">
+                      <div>
+                        <p className="font-medium">{pr.exercise}</p>
+                        <p className="text-xs text-muted-foreground">{pr.date}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-bold text-primary">{pr.weight}</p>
+                        <p className="text-xs text-muted-foreground">x {pr.reps} reps</p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-red-500" />
-                  <span className="text-xs">Deadlift</span>
-                </div>
-              </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -159,74 +284,63 @@ export default function Progress() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold">Body Weight (lbs)</h3>
-                <div className="text-right">
-                  <p className="text-2xl font-bold text-primary">173.2</p>
-                  <p className="text-xs text-green-500 flex items-center gap-1">
-                    <TrendingDown className="w-3 h-3" />
-                    -1.8 lbs
+                {latestWeight && (
+                  <div className="text-right">
+                    <p className="text-2xl font-bold text-primary">{latestWeight}</p>
+                    {weightChange !== 0 && (
+                      <p className={`text-xs flex items-center justify-end gap-1 ${weightChange < 0 ? 'text-green-500' : 'text-red-500'}`}>
+                        {weightChange < 0 ? <TrendingDown className="w-3 h-3" /> : <TrendingUp className="w-3 h-3" />}
+                        {weightChange > 0 ? '+' : ''}{weightChange} lbs
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+              {bodyWeightData.length === 0 ? (
+                <div className="text-center py-8">
+                  <Scale className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+                  <p className="text-muted-foreground">No weight data yet</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Log your body measurements to track weight changes!
                   </p>
                 </div>
-              </div>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={bodyWeightData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis 
-                      dataKey="date" 
-                      tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
-                      axisLine={{ stroke: 'hsl(var(--border))' }}
-                    />
-                    <YAxis 
-                      domain={['dataMin - 2', 'dataMax + 2']}
-                      tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
-                      axisLine={{ stroke: 'hsl(var(--border))' }}
-                    />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: 'hsl(var(--card))', 
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: '8px'
-                      }}
-                    />
-                    <Area 
-                      type="monotone" 
-                      dataKey="weight" 
-                      stroke="hsl(50, 100%, 50%)" 
-                      fill="hsl(50, 100%, 50%, 0.2)"
-                      strokeWidth={2}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
+              ) : (
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={bodyWeightData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis 
+                        dataKey="date" 
+                        tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
+                        axisLine={{ stroke: 'hsl(var(--border))' }}
+                      />
+                      <YAxis 
+                        domain={['dataMin - 2', 'dataMax + 2']}
+                        tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }}
+                        axisLine={{ stroke: 'hsl(var(--border))' }}
+                      />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: 'hsl(var(--card))', 
+                          border: '1px solid hsl(var(--border))',
+                          borderRadius: '8px'
+                        }}
+                      />
+                      <Area 
+                        type="monotone" 
+                        dataKey="weight" 
+                        stroke="hsl(var(--primary))" 
+                        fill="hsl(var(--primary) / 0.2)"
+                        strokeWidth={2}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
-
-      {/* Personal Records */}
-      <section className="mt-6">
-        <h2 className="text-lg font-semibold mb-4">Personal Records</h2>
-        <div className="space-y-3">
-          {[
-            { exercise: "Bench Press", weight: "185 lbs", reps: 5, date: "Jan 8, 2026" },
-            { exercise: "Squat", weight: "225 lbs", reps: 5, date: "Jan 5, 2026" },
-            { exercise: "Deadlift", weight: "275 lbs", reps: 3, date: "Jan 3, 2026" },
-          ].map((pr) => (
-            <Card key={pr.exercise} className="bg-card border-border">
-              <CardContent className="p-4 flex items-center justify-between">
-                <div>
-                  <p className="font-medium">{pr.exercise}</p>
-                  <p className="text-xs text-muted-foreground">{pr.date}</p>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold text-primary">{pr.weight}</p>
-                  <p className="text-xs text-muted-foreground">x {pr.reps} reps</p>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }
