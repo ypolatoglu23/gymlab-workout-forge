@@ -1,10 +1,17 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Plus, Trash2, Utensils, Droplet, Flame, Cookie } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
+import { format } from "date-fns";
 
 const nutritionGoals = {
   calories: 2200,
@@ -14,51 +21,193 @@ const nutritionGoals = {
   water: 8,
 };
 
-const initialMeals = [
-  { id: 1, name: "Breakfast", time: "8:00 AM", calories: 450, protein: 30 },
-  { id: 2, name: "Protein Shake", time: "11:00 AM", calories: 200, protein: 25 },
-  { id: 3, name: "Lunch", time: "1:00 PM", calories: 650, protein: 40 },
-  { id: 4, name: "Pre-Workout Snack", time: "4:00 PM", calories: 250, protein: 15 },
-  { id: 5, name: "Dinner", time: "7:30 PM", calories: 550, protein: 35 },
-];
+interface NutritionEntry {
+  id: string;
+  food_name: string;
+  meal_type: string;
+  calories: number;
+  protein_g: number | null;
+  carbs_g: number | null;
+  fats_g: number | null;
+  created_at: string;
+}
 
 export default function Nutrition() {
   const navigate = useNavigate();
-  const [meals, setMeals] = useState(initialMeals);
-  const [waterGlasses, setWaterGlasses] = useState(5);
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [meals, setMeals] = useState<NutritionEntry[]>([]);
+  const [waterGlasses, setWaterGlasses] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isAddingMeal, setIsAddingMeal] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
 
-  const totalCalories = meals.reduce((sum, meal) => sum + meal.calories, 0);
-  const totalProtein = meals.reduce((sum, meal) => sum + meal.protein, 0);
+  // Form state for adding meal
+  const [newMeal, setNewMeal] = useState({
+    food_name: "",
+    meal_type: "breakfast",
+    calories: "",
+    protein_g: "",
+    carbs_g: "",
+    fats_g: "",
+  });
+
+  const today = format(new Date(), "yyyy-MM-dd");
+
+  useEffect(() => {
+    if (user) {
+      fetchMeals();
+    }
+  }, [user]);
+
+  const fetchMeals = async () => {
+    if (!user) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("nutrition_entries")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("entry_date", today)
+        .order("created_at", { ascending: true });
+
+      if (error) throw error;
+      setMeals(data || []);
+    } catch (error) {
+      console.error("Error fetching meals:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load nutrition data",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAddMeal = async () => {
+    if (!user || !newMeal.food_name || !newMeal.calories) {
+      toast({
+        title: "Missing fields",
+        description: "Please enter food name and calories",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsAddingMeal(true);
+
+    try {
+      const { data, error } = await supabase
+        .from("nutrition_entries")
+        .insert({
+          user_id: user.id,
+          entry_date: today,
+          food_name: newMeal.food_name,
+          meal_type: newMeal.meal_type,
+          calories: parseInt(newMeal.calories) || 0,
+          protein_g: newMeal.protein_g ? parseFloat(newMeal.protein_g) : 0,
+          carbs_g: newMeal.carbs_g ? parseFloat(newMeal.carbs_g) : 0,
+          fats_g: newMeal.fats_g ? parseFloat(newMeal.fats_g) : 0,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setMeals([...meals, data]);
+      setNewMeal({
+        food_name: "",
+        meal_type: "breakfast",
+        calories: "",
+        protein_g: "",
+        carbs_g: "",
+        fats_g: "",
+      });
+      setDialogOpen(false);
+
+      toast({
+        title: "Meal added",
+        description: "Your meal has been logged successfully",
+      });
+    } catch (error) {
+      console.error("Error adding meal:", error);
+      toast({
+        title: "Error",
+        description: "Failed to add meal",
+        variant: "destructive",
+      });
+    } finally {
+      setIsAddingMeal(false);
+    }
+  };
+
+  const removeMeal = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from("nutrition_entries")
+        .delete()
+        .eq("id", id);
+
+      if (error) throw error;
+
+      setMeals(meals.filter((meal) => meal.id !== id));
+      toast({
+        title: "Meal removed",
+        description: "The meal has been deleted",
+      });
+    } catch (error) {
+      console.error("Error removing meal:", error);
+      toast({
+        title: "Error",
+        description: "Failed to remove meal",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const totalCalories = meals.reduce((sum, meal) => sum + (meal.calories || 0), 0);
+  const totalProtein = meals.reduce((sum, meal) => sum + (meal.protein_g || 0), 0);
 
   const macros = [
-    { 
-      name: "Calories", 
-      current: totalCalories, 
-      goal: nutritionGoals.calories, 
-      icon: Flame, 
+    {
+      name: "Calories",
+      current: totalCalories,
+      goal: nutritionGoals.calories,
+      icon: Flame,
       color: "text-orange-500",
-      unit: ""
+      unit: "",
     },
-    { 
-      name: "Protein", 
-      current: totalProtein, 
-      goal: nutritionGoals.protein, 
-      icon: Cookie, 
+    {
+      name: "Protein",
+      current: Math.round(totalProtein),
+      goal: nutritionGoals.protein,
+      icon: Cookie,
       color: "text-red-500",
-      unit: "g"
+      unit: "g",
     },
-    { 
-      name: "Water", 
-      current: waterGlasses, 
-      goal: nutritionGoals.water, 
-      icon: Droplet, 
+    {
+      name: "Water",
+      current: waterGlasses,
+      goal: nutritionGoals.water,
+      icon: Droplet,
       color: "text-blue-500",
-      unit: " glasses"
+      unit: " glasses",
     },
   ];
 
-  const removeMeal = (id: number) => {
-    setMeals(meals.filter(meal => meal.id !== id));
+  const getMealTypeLabel = (type: string) => {
+    const labels: Record<string, string> = {
+      breakfast: "Breakfast",
+      lunch: "Lunch",
+      dinner: "Dinner",
+      snack: "Snack",
+    };
+    return labels[type] || type;
+  };
+
+  const formatTime = (dateString: string) => {
+    return format(new Date(dateString), "h:mm a");
   };
 
   return (
@@ -76,9 +225,7 @@ export default function Nutrition() {
 
       {/* Date Selector */}
       <div className="flex items-center justify-center gap-4 mb-6">
-        <Button variant="ghost" size="sm">←</Button>
-        <p className="font-semibold">Today, Jan 10</p>
-        <Button variant="ghost" size="sm">→</Button>
+        <p className="font-semibold">Today, {format(new Date(), "MMM d")}</p>
       </div>
 
       {/* Macro Overview */}
@@ -94,11 +241,14 @@ export default function Nutrition() {
                   </div>
                   <span className="text-sm">
                     <span className="font-bold">{macro.current}</span>
-                    <span className="text-muted-foreground">/{macro.goal}{macro.unit}</span>
+                    <span className="text-muted-foreground">
+                      /{macro.goal}
+                      {macro.unit}
+                    </span>
                   </span>
                 </div>
-                <Progress 
-                  value={Math.min((macro.current / macro.goal) * 100, 100)} 
+                <Progress
+                  value={Math.min((macro.current / macro.goal) * 100, 100)}
                   className="h-2"
                 />
               </div>
@@ -115,7 +265,9 @@ export default function Nutrition() {
               <Droplet className="w-4 h-4 text-blue-500" />
               Water Intake
             </h3>
-            <span className="text-sm text-muted-foreground">{waterGlasses}/{nutritionGoals.water} glasses</span>
+            <span className="text-sm text-muted-foreground">
+              {waterGlasses}/{nutritionGoals.water} glasses
+            </span>
           </div>
           <div className="flex items-center justify-center gap-2 flex-wrap">
             {Array.from({ length: nutritionGoals.water }).map((_, index) => (
@@ -124,7 +276,7 @@ export default function Nutrition() {
                 variant="ghost"
                 size="icon"
                 className={`w-10 h-10 rounded-full transition-colors ${
-                  index < waterGlasses ? 'bg-blue-500 text-white' : 'bg-secondary'
+                  index < waterGlasses ? "bg-blue-500 text-white" : "bg-secondary"
                 }`}
                 onClick={() => setWaterGlasses(index + 1)}
               >
@@ -139,52 +291,168 @@ export default function Nutrition() {
       <section>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">Today's Meals</h2>
-          <Button size="sm" className="gap-1">
-            <Plus className="w-4 h-4" />
-            Add Meal
-          </Button>
-        </div>
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <DialogTrigger asChild>
+              <Button size="sm" className="gap-1">
+                <Plus className="w-4 h-4" />
+                Add Meal
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Add Meal</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="food_name">Food Name *</Label>
+                  <Input
+                    id="food_name"
+                    placeholder="e.g., Grilled Chicken Salad"
+                    value={newMeal.food_name}
+                    onChange={(e) =>
+                      setNewMeal({ ...newMeal, food_name: e.target.value })
+                    }
+                  />
+                </div>
 
-        <div className="space-y-3">
-          {meals.map((meal) => (
-            <Card key={meal.id} className="bg-card border-border">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-secondary">
-                      <Utensils className="w-4 h-4 text-primary" />
-                    </div>
-                    <div>
-                      <p className="font-medium">{meal.name}</p>
-                      <p className="text-xs text-muted-foreground">{meal.time}</p>
-                    </div>
+                <div className="space-y-2">
+                  <Label htmlFor="meal_type">Meal Type</Label>
+                  <Select
+                    value={newMeal.meal_type}
+                    onValueChange={(value) =>
+                      setNewMeal({ ...newMeal, meal_type: value })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select meal type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="breakfast">Breakfast</SelectItem>
+                      <SelectItem value="lunch">Lunch</SelectItem>
+                      <SelectItem value="dinner">Dinner</SelectItem>
+                      <SelectItem value="snack">Snack</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="calories">Calories *</Label>
+                  <Input
+                    id="calories"
+                    type="number"
+                    placeholder="e.g., 450"
+                    value={newMeal.calories}
+                    onChange={(e) =>
+                      setNewMeal({ ...newMeal, calories: e.target.value })
+                    }
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="protein_g">Protein (g)</Label>
+                    <Input
+                      id="protein_g"
+                      type="number"
+                      placeholder="0"
+                      value={newMeal.protein_g}
+                      onChange={(e) =>
+                        setNewMeal({ ...newMeal, protein_g: e.target.value })
+                      }
+                    />
                   </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <p className="text-sm font-medium">{meal.calories} kcal</p>
-                      <p className="text-xs text-muted-foreground">{meal.protein}g protein</p>
-                    </div>
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className="text-muted-foreground hover:text-destructive"
-                      onClick={() => removeMeal(meal.id)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                  <div className="space-y-2">
+                    <Label htmlFor="carbs_g">Carbs (g)</Label>
+                    <Input
+                      id="carbs_g"
+                      type="number"
+                      placeholder="0"
+                      value={newMeal.carbs_g}
+                      onChange={(e) =>
+                        setNewMeal({ ...newMeal, carbs_g: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="fats_g">Fats (g)</Label>
+                    <Input
+                      id="fats_g"
+                      type="number"
+                      placeholder="0"
+                      value={newMeal.fats_g}
+                      onChange={(e) =>
+                        setNewMeal({ ...newMeal, fats_g: e.target.value })
+                      }
+                    />
                   </div>
                 </div>
-              </CardContent>
-            </Card>
-          ))}
+
+                <Button
+                  onClick={handleAddMeal}
+                  className="w-full"
+                  disabled={isAddingMeal}
+                >
+                  {isAddingMeal ? "Adding..." : "Add Meal"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
 
-        {meals.length === 0 && (
+        {isLoading ? (
+          <Card className="bg-card border-border">
+            <CardContent className="p-8 text-center">
+              <p className="text-muted-foreground">Loading meals...</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-3">
+            {meals.map((meal) => (
+              <Card key={meal.id} className="bg-card border-border">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 rounded-lg bg-secondary">
+                        <Utensils className="w-4 h-4 text-primary" />
+                      </div>
+                      <div>
+                        <p className="font-medium">{meal.food_name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {getMealTypeLabel(meal.meal_type)} • {formatTime(meal.created_at)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="text-right">
+                        <p className="text-sm font-medium">{meal.calories} kcal</p>
+                        <p className="text-xs text-muted-foreground">
+                          {meal.protein_g || 0}g protein
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => removeMeal(meal.id)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+
+        {!isLoading && meals.length === 0 && (
           <Card className="bg-card border-border border-dashed">
             <CardContent className="p-8 text-center">
               <Utensils className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
               <p className="font-medium mb-1">No meals logged</p>
-              <p className="text-sm text-muted-foreground">Add your first meal to start tracking</p>
+              <p className="text-sm text-muted-foreground">
+                Add your first meal to start tracking
+              </p>
             </CardContent>
           </Card>
         )}
