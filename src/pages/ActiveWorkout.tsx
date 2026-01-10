@@ -8,16 +8,31 @@ import {
   Minus,
   SkipForward,
   Pause,
-  Play,
-  X
+  Play
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
 
-const workoutData = {
-  name: "Push Day",
+interface WorkoutSet {
+  id: number;
+  weight: number;
+  reps: number;
+  completed: boolean;
+}
+
+interface Exercise {
+  id: number;
+  name: string;
+  sets: WorkoutSet[];
+}
+
+const defaultWorkoutData = {
+  name: "Quick Workout",
   exercises: [
     {
       id: 1,
@@ -62,11 +77,56 @@ const workoutData = {
 export default function ActiveWorkout() {
   const navigate = useNavigate();
   const { routineId } = useParams();
-  const [exercises, setExercises] = useState(workoutData.exercises);
+  const { user } = useAuth();
+  const [workoutName, setWorkoutName] = useState(defaultWorkoutData.name);
+  const [exercises, setExercises] = useState<Exercise[]>(defaultWorkoutData.exercises);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [restTimer, setRestTimer] = useState(0);
   const [isResting, setIsResting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [startedAt] = useState(new Date());
+
+  useEffect(() => {
+    if (routineId) {
+      fetchRoutine();
+    }
+  }, [routineId]);
+
+  const fetchRoutine = async () => {
+    if (!routineId || !user) return;
+
+    const { data: routine, error } = await supabase
+      .from('routines')
+      .select('*')
+      .eq('id', routineId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Error fetching routine:', error);
+      return;
+    }
+
+    if (routine) {
+      setWorkoutName(routine.name);
+      // Parse routine exercises if available
+      if (routine.exercises && Array.isArray(routine.exercises)) {
+        const routineExercises = (routine.exercises as any[]).map((ex, index) => ({
+          id: index + 1,
+          name: ex.name || `Exercise ${index + 1}`,
+          sets: (ex.sets || [{ weight: 0, reps: 10 }]).map((set: any, setIndex: number) => ({
+            id: setIndex + 1,
+            weight: set.weight || 0,
+            reps: set.reps || 10,
+            completed: false
+          }))
+        }));
+        if (routineExercises.length > 0) {
+          setExercises(routineExercises);
+        }
+      }
+    }
+  };
 
   useEffect(() => {
     if (!isPaused) {
@@ -139,8 +199,62 @@ export default function ActiveWorkout() {
   const completedSets = exercises.reduce((acc, ex) => acc + ex.sets.filter(s => s.completed).length, 0);
   const totalSets = exercises.reduce((acc, ex) => acc + ex.sets.length, 0);
 
-  const finishWorkout = () => {
-    navigate("/history");
+  const finishWorkout = async () => {
+    if (!user) {
+      toast.error("You must be logged in to save workouts");
+      return;
+    }
+
+    setIsSaving(true);
+
+    try {
+      // Create the workout record
+      const { data: workout, error: workoutError } = await supabase
+        .from('workouts')
+        .insert({
+          user_id: user.id,
+          name: workoutName,
+          started_at: startedAt.toISOString(),
+          completed_at: new Date().toISOString(),
+          duration_seconds: elapsedTime,
+          routine_id: routineId || null
+        })
+        .select()
+        .single();
+
+      if (workoutError) throw workoutError;
+
+      // Insert exercise logs for completed sets
+      const exerciseLogs = exercises.flatMap(exercise =>
+        exercise.sets
+          .filter(set => set.completed)
+          .map(set => ({
+            workout_id: workout.id,
+            user_id: user.id,
+            exercise_name: exercise.name,
+            set_number: set.id,
+            weight_kg: set.weight * 0.453592, // Convert lbs to kg
+            reps: set.reps,
+            is_completed: true
+          }))
+      );
+
+      if (exerciseLogs.length > 0) {
+        const { error: logsError } = await supabase
+          .from('exercise_logs')
+          .insert(exerciseLogs);
+
+        if (logsError) throw logsError;
+      }
+
+      toast.success("Workout saved successfully!");
+      navigate("/");
+    } catch (error) {
+      console.error('Error saving workout:', error);
+      toast.error("Failed to save workout");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -153,7 +267,7 @@ export default function ActiveWorkout() {
               <ArrowLeft className="w-5 h-5" />
             </Button>
             <div>
-              <h1 className="font-bold">{workoutData.name}</h1>
+              <h1 className="font-bold">{workoutName}</h1>
               <p className="text-xs text-muted-foreground">
                 {completedSets}/{totalSets} sets completed
               </p>
@@ -307,10 +421,10 @@ export default function ActiveWorkout() {
         <Button 
           className="w-full h-14 text-lg font-bold gym-glow"
           onClick={finishWorkout}
-          disabled={completedSets === 0}
+          disabled={completedSets === 0 || isSaving}
         >
           <Check className="w-5 h-5 mr-2" />
-          Finish Workout
+          {isSaving ? "Saving..." : "Finish Workout"}
         </Button>
       </div>
     </div>
