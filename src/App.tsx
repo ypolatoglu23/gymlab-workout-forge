@@ -16,6 +16,8 @@ import Progress from "./pages/Progress";
 import Nutrition from "./pages/Nutrition";
 import Leaderboard from "./pages/Leaderboard";
 import Profile from "./pages/Profile";
+import EditProfile from "./pages/EditProfile";
+import Settings from "./pages/Settings";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
@@ -48,6 +50,8 @@ const App = () => (
               <Route path="/nutrition" element={<Nutrition />} />
               <Route path="/leaderboard" element={<Leaderboard />} />
               <Route path="/profile" element={<Profile />} />
+              <Route path="/profile/edit" element={<EditProfile />} />
+              <Route path="/settings" element={<Settings />} />
             </Route>
             
             {/* 404 */}
