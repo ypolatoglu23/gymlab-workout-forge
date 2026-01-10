@@ -200,19 +200,23 @@ export default function ActiveWorkout() {
   const totalSets = exercises.reduce((acc, ex) => acc + ex.sets.length, 0);
 
   const finishWorkout = async () => {
-    if (!user) {
-      toast.error("You must be logged in to save workouts");
-      return;
-    }
-
     setIsSaving(true);
 
     try {
-      // Create the workout record
+      // Get fresh user session to ensure we have valid user_id
+      const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser();
+      
+      if (userError || !currentUser) {
+        toast.error("You must be logged in to save workouts");
+        setIsSaving(false);
+        return;
+      }
+
+      // Create the workout record with explicit user_id
       const { data: workout, error: workoutError } = await supabase
         .from('workouts')
         .insert({
-          user_id: user.id,
+          user_id: currentUser.id,
           name: workoutName,
           started_at: startedAt.toISOString(),
           completed_at: new Date().toISOString(),
@@ -222,15 +226,18 @@ export default function ActiveWorkout() {
         .select()
         .single();
 
-      if (workoutError) throw workoutError;
+      if (workoutError) {
+        console.error('Workout insert error:', workoutError);
+        throw workoutError;
+      }
 
       // Insert exercise logs for completed sets
-      const exerciseLogs = exercises.flatMap(exercise =>
+      const exerciseLogsData = exercises.flatMap(exercise =>
         exercise.sets
           .filter(set => set.completed)
           .map(set => ({
             workout_id: workout.id,
-            user_id: user.id,
+            user_id: currentUser.id,
             exercise_name: exercise.name,
             set_number: set.id,
             weight_kg: set.weight * 0.453592, // Convert lbs to kg
@@ -239,19 +246,22 @@ export default function ActiveWorkout() {
           }))
       );
 
-      if (exerciseLogs.length > 0) {
+      if (exerciseLogsData.length > 0) {
         const { error: logsError } = await supabase
           .from('exercise_logs')
-          .insert(exerciseLogs);
+          .insert(exerciseLogsData);
 
-        if (logsError) throw logsError;
+        if (logsError) {
+          console.error('Exercise logs insert error:', logsError);
+          throw logsError;
+        }
       }
 
       toast.success("Workout saved successfully!");
       navigate("/");
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving workout:', error);
-      toast.error("Failed to save workout");
+      toast.error(error?.message || "Failed to save workout");
     } finally {
       setIsSaving(false);
     }
