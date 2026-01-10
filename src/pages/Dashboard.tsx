@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { 
   Play, 
@@ -14,25 +14,102 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { format, formatDistanceToNow } from "date-fns";
+
+interface Workout {
+  id: string;
+  name: string;
+  created_at: string;
+  duration_seconds: number | null;
+  completed_at: string | null;
+}
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [streak] = useState(12);
-  const [todayCalories] = useState(1850);
+  const { user } = useAuth();
+  const [streak] = useState(0);
+  const [todayCalories, setTodayCalories] = useState(0);
   const [caloriesGoal] = useState(2200);
-  const [todayProtein] = useState(120);
+  const [todayProtein, setTodayProtein] = useState(0);
   const [proteinGoal] = useState(150);
+  const [recentWorkouts, setRecentWorkouts] = useState<Workout[]>([]);
+  const [weeklyWorkouts, setWeeklyWorkouts] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (user) {
+      fetchDashboardData();
+    } else {
+      setIsLoading(false);
+    }
+  }, [user]);
+
+  const fetchDashboardData = async () => {
+    if (!user) return;
+
+    try {
+      // Fetch recent workouts
+      const { data: workouts, error: workoutsError } = await supabase
+        .from('workouts')
+        .select('id, name, created_at, duration_seconds, completed_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (workoutsError) throw workoutsError;
+      setRecentWorkouts(workouts || []);
+
+      // Fetch weekly workouts count
+      const oneWeekAgo = new Date();
+      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+      
+      const { count: weeklyCount, error: weeklyError } = await supabase
+        .from('workouts')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .gte('created_at', oneWeekAgo.toISOString());
+
+      if (!weeklyError) {
+        setWeeklyWorkouts(weeklyCount || 0);
+      }
+
+      // Fetch today's nutrition
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const { data: nutritionData, error: nutritionError } = await supabase
+        .from('nutrition_entries')
+        .select('calories, protein_g')
+        .eq('user_id', user.id)
+        .eq('entry_date', today);
+
+      if (!nutritionError && nutritionData) {
+        const totalCalories = nutritionData.reduce((sum, entry) => sum + (entry.calories || 0), 0);
+        const totalProtein = nutritionData.reduce((sum, entry) => sum + Number(entry.protein_g || 0), 0);
+        setTodayCalories(totalCalories);
+        setTodayProtein(totalProtein);
+      }
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const formatDuration = (seconds: number | null) => {
+    if (!seconds) return "0 min";
+    const mins = Math.floor(seconds / 60);
+    return `${mins} min`;
+  };
+
+  const formatWorkoutDate = (dateString: string) => {
+    return formatDistanceToNow(new Date(dateString), { addSuffix: true });
+  };
 
   const quickStats = [
     { icon: Flame, label: "Streak", value: `${streak} days`, color: "text-orange-500" },
-    { icon: Target, label: "Weekly Goal", value: "4/5", color: "text-primary" },
-    { icon: TrendingUp, label: "This Week", value: "3.2k lbs", color: "text-green-500" },
-  ];
-
-  const recentWorkouts = [
-    { name: "Push Day", date: "Yesterday", duration: "52 min", exercises: 6 },
-    { name: "Pull Day", date: "2 days ago", duration: "48 min", exercises: 5 },
-    { name: "Leg Day", date: "4 days ago", duration: "55 min", exercises: 7 },
+    { icon: Target, label: "Weekly Goal", value: `${weeklyWorkouts}/5`, color: "text-primary" },
+    { icon: TrendingUp, label: "This Week", value: `${weeklyWorkouts} workouts`, color: "text-green-500" },
   ];
 
   return (
@@ -143,28 +220,42 @@ export default function Dashboard() {
         </div>
         
         <div className="space-y-3">
-          {recentWorkouts.map((workout, index) => (
-            <Card 
-              key={index} 
-              className="bg-card border-border cursor-pointer hover:bg-muted transition-colors"
-              onClick={() => navigate("/history")}
-            >
-              <CardContent className="p-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-secondary">
-                    <Calendar className="w-4 h-4 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="font-medium">{workout.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {workout.date} • {workout.duration} • {workout.exercises} exercises
-                    </p>
-                  </div>
-                </div>
-                <ChevronRight className="w-4 h-4 text-muted-foreground" />
+          {isLoading ? (
+            <Card className="bg-card border-border">
+              <CardContent className="p-4 text-center text-muted-foreground">
+                Loading...
               </CardContent>
             </Card>
-          ))}
+          ) : recentWorkouts.length === 0 ? (
+            <Card className="bg-card border-border">
+              <CardContent className="p-4 text-center text-muted-foreground">
+                No workouts yet. Start your first workout!
+              </CardContent>
+            </Card>
+          ) : (
+            recentWorkouts.map((workout) => (
+              <Card 
+                key={workout.id} 
+                className="bg-card border-border cursor-pointer hover:bg-muted transition-colors"
+                onClick={() => navigate("/history")}
+              >
+                <CardContent className="p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-secondary">
+                      <Calendar className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <p className="font-medium">{workout.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatWorkoutDate(workout.created_at)} • {formatDuration(workout.duration_seconds)}
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                </CardContent>
+              </Card>
+            ))
+          )}
         </div>
       </section>
     </div>
