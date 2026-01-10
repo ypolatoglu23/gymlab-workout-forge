@@ -74,6 +74,12 @@ const defaultWorkoutData = {
   ]
 };
 
+// UUID validation helper
+const isValidUUID = (str: string): boolean => {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(str);
+};
+
 export default function ActiveWorkout() {
   const navigate = useNavigate();
   const { routineId } = useParams();
@@ -87,19 +93,22 @@ export default function ActiveWorkout() {
   const [isSaving, setIsSaving] = useState(false);
   const [startedAt] = useState(new Date());
 
+  // Only use routineId if it's a valid UUID
+  const validRoutineId = routineId && isValidUUID(routineId) ? routineId : null;
+
   useEffect(() => {
-    if (routineId) {
+    if (validRoutineId) {
       fetchRoutine();
     }
-  }, [routineId]);
+  }, [validRoutineId]);
 
   const fetchRoutine = async () => {
-    if (!routineId || !user) return;
+    if (!validRoutineId || !user) return;
 
     const { data: routine, error } = await supabase
       .from('routines')
       .select('*')
-      .eq('id', routineId)
+      .eq('id', validRoutineId)
       .maybeSingle();
 
     if (error) {
@@ -221,7 +230,7 @@ export default function ActiveWorkout() {
           started_at: startedAt.toISOString(),
           completed_at: new Date().toISOString(),
           duration_seconds: elapsedTime,
-          routine_id: routineId || null
+          routine_id: validRoutineId
         })
         .select()
         .single();
