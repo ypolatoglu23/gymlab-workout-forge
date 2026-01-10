@@ -6,31 +6,73 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import logo from "@/assets/logo.png";
 
 export default function Auth() {
   const navigate = useNavigate();
+  const { toast } = useToast();
+  const { signIn, signUp } = useAuth();
+  
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Login form state
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  
+  // Signup form state
+  const [signupName, setSignupName] = useState("");
+  const [signupEmail, setSignupEmail] = useState("");
+  const [signupPassword, setSignupPassword] = useState("");
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    // Simulate login - will be connected to Supabase
-    setTimeout(() => {
+    
+    const { error } = await signIn(loginEmail, loginPassword);
+    
+    if (error) {
+      toast({
+        title: "Login Failed",
+        description: error.message,
+        variant: "destructive",
+      });
       setIsLoading(false);
-      navigate("/");
-    }, 1000);
+      return;
+    }
+    
+    toast({
+      title: "Welcome back!",
+      description: "You've successfully logged in.",
+    });
+    navigate("/");
+    setIsLoading(false);
   };
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    // Simulate signup - will be connected to Supabase
-    setTimeout(() => {
+    
+    const { error } = await signUp(signupEmail, signupPassword);
+    
+    if (error) {
+      toast({
+        title: "Signup Failed",
+        description: error.message,
+        variant: "destructive",
+      });
       setIsLoading(false);
-      navigate("/");
-    }, 1000);
+      return;
+    }
+    
+    toast({
+      title: "Account Created!",
+      description: "Welcome to GYMLAB. Let's start training!",
+    });
+    navigate("/");
+    setIsLoading(false);
   };
 
   return (
@@ -62,6 +104,8 @@ export default function Auth() {
                       type="email" 
                       placeholder="you@example.com"
                       className="pl-10"
+                      value={loginEmail}
+                      onChange={(e) => setLoginEmail(e.target.value)}
                       required
                     />
                   </div>
@@ -76,6 +120,8 @@ export default function Auth() {
                       type={showPassword ? "text" : "password"} 
                       placeholder="••••••••"
                       className="pl-10 pr-10"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
                       required
                     />
                     <Button
@@ -121,6 +167,8 @@ export default function Auth() {
                       type="text" 
                       placeholder="John Doe"
                       className="pl-10"
+                      value={signupName}
+                      onChange={(e) => setSignupName(e.target.value)}
                       required
                     />
                   </div>
@@ -135,6 +183,8 @@ export default function Auth() {
                       type="email" 
                       placeholder="you@example.com"
                       className="pl-10"
+                      value={signupEmail}
+                      onChange={(e) => setSignupEmail(e.target.value)}
                       required
                     />
                   </div>
@@ -149,6 +199,8 @@ export default function Auth() {
                       type={showPassword ? "text" : "password"} 
                       placeholder="••••••••"
                       className="pl-10 pr-10"
+                      value={signupPassword}
+                      onChange={(e) => setSignupPassword(e.target.value)}
                       required
                       minLength={8}
                     />
