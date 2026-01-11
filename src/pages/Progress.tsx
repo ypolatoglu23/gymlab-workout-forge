@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useUnitPreferences } from "@/contexts/UnitPreferencesContext";
 
 interface WorkoutStats {
   totalWorkouts: number;
@@ -30,6 +31,7 @@ interface PersonalRecord {
 export default function Progress() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
+  const { weightUnit } = useUnitPreferences();
   const [activeTab, setActiveTab] = useState("strength");
   const [isLoading, setIsLoading] = useState(true);
   const [stats, setStats] = useState<WorkoutStats>({
@@ -86,7 +88,10 @@ export default function Progress() {
       // Calculate stats
       const totalWorkouts = workouts?.length || 0;
       const totalVolume = (exerciseLogs || []).reduce((sum, log) => {
-        return sum + ((log.weight_kg || 0) * (log.reps || 0) * 2.20462); // Convert to lbs
+        const weightInPreferredUnit = weightUnit === 'kg' 
+          ? (log.weight_kg || 0) 
+          : (log.weight_kg || 0) * 2.20462;
+        return sum + (weightInPreferredUnit * (log.reps || 0));
       }, 0);
       const avgSession = totalWorkouts > 0
         ? Math.round((workouts || []).reduce((sum, w) => sum + (w.duration_seconds || 0), 0) / totalWorkouts / 60)
@@ -107,7 +112,9 @@ export default function Progress() {
         .filter(m => m.weight_kg !== null)
         .map(m => ({
           date: new Date(m.measured_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-          weight: Math.round((m.weight_kg || 0) * 2.20462 * 10) / 10 // Convert to lbs
+          weight: weightUnit === 'kg' 
+            ? Math.round((m.weight_kg || 0) * 10) / 10
+            : Math.round((m.weight_kg || 0) * 2.20462 * 10) / 10
         }));
       setBodyWeightData(weightData);
 
@@ -163,12 +170,14 @@ export default function Progress() {
     const exerciseMaxes: Record<string, { weight: number; reps: number; date: string }> = {};
 
     logs.forEach(log => {
-      const weightLbs = (log.weight_kg || 0) * 2.20462;
+      const weightInPreferredUnit = weightUnit === 'kg' 
+        ? (log.weight_kg || 0) 
+        : (log.weight_kg || 0) * 2.20462;
       const exercise = log.exercise_name;
 
-      if (!exerciseMaxes[exercise] || weightLbs > exerciseMaxes[exercise].weight) {
+      if (!exerciseMaxes[exercise] || weightInPreferredUnit > exerciseMaxes[exercise].weight) {
         exerciseMaxes[exercise] = {
-          weight: Math.round(weightLbs),
+          weight: Math.round(weightInPreferredUnit),
           reps: log.reps || 0,
           date: new Date(log.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
         };
@@ -178,7 +187,7 @@ export default function Progress() {
     return Object.entries(exerciseMaxes)
       .map(([exercise, data]) => ({
         exercise,
-        weight: `${data.weight} lbs`,
+        weight: `${data.weight} ${weightUnit}`,
         reps: data.reps,
         date: data.date
       }))
@@ -188,7 +197,7 @@ export default function Progress() {
 
   const statsDisplay = [
     { label: "Total Workouts", value: stats.totalWorkouts.toString(), change: "", positive: true },
-    { label: "Total Volume", value: stats.totalVolume > 1000 ? `${(stats.totalVolume / 1000).toFixed(1)}k lbs` : `${stats.totalVolume} lbs`, change: "", positive: true },
+    { label: "Total Volume", value: stats.totalVolume > 1000 ? `${(stats.totalVolume / 1000).toFixed(1)}k ${weightUnit}` : `${stats.totalVolume} ${weightUnit}`, change: "", positive: true },
     { label: "Current Streak", value: `${stats.currentStreak} days`, change: "", positive: true },
     { label: "Avg. Session", value: `${stats.avgSessionMinutes} min`, change: "", positive: true },
   ];
@@ -283,14 +292,14 @@ export default function Progress() {
           <Card className="bg-card border-border">
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold">Body Weight (lbs)</h3>
+                <h3 className="font-semibold">Body Weight ({weightUnit})</h3>
                 {latestWeight && (
                   <div className="text-right">
                     <p className="text-2xl font-bold text-primary">{latestWeight}</p>
                     {weightChange !== 0 && (
                       <p className={`text-xs flex items-center justify-end gap-1 ${weightChange < 0 ? 'text-green-500' : 'text-red-500'}`}>
                         {weightChange < 0 ? <TrendingDown className="w-3 h-3" /> : <TrendingUp className="w-3 h-3" />}
-                        {weightChange > 0 ? '+' : ''}{weightChange} lbs
+                        {weightChange > 0 ? '+' : ''}{weightChange} {weightUnit}
                       </p>
                     )}
                   </div>
