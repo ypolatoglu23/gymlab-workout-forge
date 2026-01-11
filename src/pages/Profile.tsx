@@ -17,8 +17,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth } from "@/contexts/AuthContext";
+import { useUnitPreferences } from "@/contexts/UnitPreferencesContext";
 import { supabase } from "@/integrations/supabase/client";
-
 interface ProfileData {
   username: string | null;
   full_name: string | null;
@@ -38,10 +38,10 @@ interface WorkoutStats {
 export default function Profile() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { formatWeight, formatHeight } = useUnitPreferences();
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [stats, setStats] = useState<WorkoutStats>({ totalWorkouts: 0, currentStreak: 0 });
-
   useEffect(() => {
     if (user) {
       fetchProfileAndStats();
@@ -88,18 +88,6 @@ export default function Profile() {
     return "U";
   };
 
-  const formatHeight = (cm: number | null) => {
-    if (!cm) return "—";
-    const feet = Math.floor(cm / 30.48);
-    const inches = Math.round((cm % 30.48) / 2.54);
-    return `${feet}'${inches}"`;
-  };
-
-  const formatWeight = (kg: number | null) => {
-    if (!kg) return "—";
-    const lbs = Math.round(kg * 2.205);
-    return `${lbs} lbs`;
-  };
 
   const getMemberSince = () => {
     if (!profile?.created_at) return "";
