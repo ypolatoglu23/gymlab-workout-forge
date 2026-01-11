@@ -16,6 +16,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useUnitPreferences } from "@/contexts/UnitPreferencesContext";
 import { toast } from "sonner";
 
 interface WorkoutSet {
@@ -84,6 +85,7 @@ export default function ActiveWorkout() {
   const navigate = useNavigate();
   const { routineId } = useParams();
   const { user } = useAuth();
+  const { weightUnit } = useUnitPreferences();
   const [workoutName, setWorkoutName] = useState(defaultWorkoutData.name);
   const [exercises, setExercises] = useState<Exercise[]>(defaultWorkoutData.exercises);
   const [elapsedTime, setElapsedTime] = useState(0);
@@ -249,7 +251,7 @@ export default function ActiveWorkout() {
             user_id: currentUser.id,
             exercise_name: exercise.name,
             set_number: set.id,
-            weight_kg: set.weight * 0.453592, // Convert lbs to kg
+            weight_kg: weightUnit === 'kg' ? set.weight : set.weight * 0.453592, // Convert lbs to kg if needed
             reps: set.reps,
             is_completed: true
           }))
@@ -343,7 +345,7 @@ export default function ActiveWorkout() {
               {/* Set Header */}
               <div className="grid grid-cols-12 gap-2 mb-3 text-xs text-muted-foreground font-medium">
                 <div className="col-span-1">SET</div>
-                <div className="col-span-4 text-center">WEIGHT (lbs)</div>
+                <div className="col-span-4 text-center">WEIGHT ({weightUnit})</div>
                 <div className="col-span-4 text-center">REPS</div>
                 <div className="col-span-3 text-center">✓</div>
               </div>
