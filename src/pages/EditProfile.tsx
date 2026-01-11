@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
+import { useUnitPreferences } from "@/contexts/UnitPreferencesContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
@@ -15,6 +16,7 @@ export default function EditProfile() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { toast } = useToast();
+  const { weightUnit, heightUnit } = useUnitPreferences();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
@@ -212,38 +214,38 @@ export default function EditProfile() {
           
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="height_cm">Height (cm)</Label>
+              <Label htmlFor="height_cm">Height ({heightUnit})</Label>
               <Input
                 id="height_cm"
                 type="number"
                 value={formData.height_cm}
                 onChange={(e) => setFormData({ ...formData, height_cm: e.target.value })}
-                placeholder="175"
+                placeholder={heightUnit === 'cm' ? "175" : "5.9"}
                 className="bg-secondary border-border"
               />
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="weight_kg">Weight (kg)</Label>
+              <Label htmlFor="weight_kg">Weight ({weightUnit})</Label>
               <Input
                 id="weight_kg"
                 type="number"
                 value={formData.weight_kg}
                 onChange={(e) => setFormData({ ...formData, weight_kg: e.target.value })}
-                placeholder="70"
+                placeholder={weightUnit === 'kg' ? "70" : "154"}
                 className="bg-secondary border-border"
               />
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="goal_weight_kg">Goal Weight (kg)</Label>
+            <Label htmlFor="goal_weight_kg">Goal Weight ({weightUnit})</Label>
             <Input
               id="goal_weight_kg"
               type="number"
               value={formData.goal_weight_kg}
               onChange={(e) => setFormData({ ...formData, goal_weight_kg: e.target.value })}
-              placeholder="65"
+              placeholder={weightUnit === 'kg' ? "65" : "143"}
               className="bg-secondary border-border"
             />
           </div>
