@@ -63,6 +63,47 @@
     --sidebar-ring: 50 100% 50%;
   }
 
+  .light {
+    --background: 0 0% 98%;
+    --foreground: 0 0% 4%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 4%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 4%;
+    --primary: 50 100% 45%;
+    --primary-foreground: 0 0% 4%;
+    --secondary: 0 0% 92%;
+    --secondary-foreground: 0 0% 15%;
+    --muted: 0 0% 94%;
+    --muted-foreground: 0 0% 40%;
+    --accent: 50 100% 45%;
+    --accent-foreground: 0 0% 4%;
+    --destructive: 0 84% 55%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 88%;
+    --input: 0 0% 88%;
+    --ring: 50 100% 45%;
+    --sidebar-background: 0 0% 96%;
+    --sidebar-foreground: 0 0% 4%;
+    --sidebar-primary: 50 100% 45%;
+    --sidebar-primary-foreground: 0 0% 4%;
+    --sidebar-accent: 0 0% 90%;
+    --sidebar-accent-foreground: 0 0% 4%;
+    --sidebar-border: 0 0% 88%;
+    --sidebar-ring: 50 100% 45%;
+    
+    --gym-yellow: 50 100% 45%;
+    --gym-yellow-glow: 50 100% 55%;
+    --gym-dark: 0 0% 98%;
+    --gym-card: 0 0% 100%;
+    --gym-card-hover: 0 0% 96%;
+    --gym-surface: 0 0% 96%;
+    --gym-border: 0 0% 88%;
+    --gym-text-primary: 0 0% 4%;
+    --gym-text-secondary: 0 0% 35%;
+    --gym-text-muted: 0 0% 55%;
+  }
+
   .dark {
     --background: 0 0% 4%;
     --foreground: 0 0% 98%;
@@ -99,8 +140,12 @@
     @apply border-border;
   }
 
-  html {
-    @apply dark;
+  html.dark {
+    color-scheme: dark;
+  }
+
+  html.light {
+    color-scheme: light;
   }
 
   body {
